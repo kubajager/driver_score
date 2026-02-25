@@ -454,7 +454,7 @@ def main() -> None:
     matches = search_drivers(all_data, query) if query else pd.DataFrame()
 
     if matches.empty and query:
-        st.info("Žádný kurýr nevyhovuje hledání.")
+        st.info("Kurýr nebyl nalezen. Buď je špatně napsáno příjmení/ID, nebo kurýr neodjel dostatek jízd pro vyhodnocení.")
         if selected_key:
             del st.session_state["selected_driver_key"]
         st.stop()
