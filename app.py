@@ -128,6 +128,8 @@ BRAND_CSS = """
   .insight-box .insight-why { font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.4rem; }
   .insight-strength { background: rgba(0, 148, 20, 0.08); border-left: 4px solid var(--green); }
   .insight-strength .insight-title { color: var(--green); }
+  .insight-average { background: rgba(149, 163, 182, 0.12); border-left: 4px solid var(--text-tertiary); }
+  .insight-average .insight-title { color: var(--text-secondary); }
   .insight-focus { background: rgba(248, 113, 113, 0.08); border-left: 4px solid #F87171; }
   .insight-focus .insight-title { color: #F87171; }
   .data-source-caption { font-size: 0.8rem; color: var(--text-tertiary); margin-top: 0.75rem; }
@@ -276,17 +278,22 @@ def search_drivers(all_data: pd.DataFrame, query: str) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 
 
+AT_MEDIAN_TOLERANCE = 0.005
+
+
 def get_insights(
     row: pd.Series,
     benchmarks: dict[str, dict[str, float]],
     metric_cols: list[str],
-) -> tuple[list[tuple[str, float, dict]], list[tuple[str, float, dict]]]:
+) -> tuple[list[tuple[str, float, dict]], list[tuple[str, float, dict]], list[tuple[str, float, dict]]]:
     """
-    Returns (strengths, focus_next).
+    Returns (strengths, focus_next, at_median).
     Each item: (metric_name, driver_value, {p25, p50, p75, delta_to_median, recommendation}).
+    at_median = metrics where driver value is at/near median (Průměr).
     """
     strengths: list[tuple[str, float, dict]] = []
     focus: list[tuple[str, float, dict]] = []
+    at_median: list[tuple[str, float, dict]] = []
     deltas: list[tuple[str, float, float]] = []  # (metric, value, delta_to_median)
 
     for col in metric_cols:
@@ -303,17 +310,25 @@ def get_insights(
         deltas.append((col, v, delta))
 
     if not deltas:
-        return strengths, focus
+        return strengths, focus, at_median
 
-    deltas.sort(key=lambda x: x[2], reverse=True)
-    for col, v, delta in deltas[:2]:
+    above = [(c, v, d) for c, v, d in deltas if d > AT_MEDIAN_TOLERANCE]
+    below = [(c, v, d) for c, v, d in deltas if d < -AT_MEDIAN_TOLERANCE]
+    at_median_deltas = [(c, v, d) for c, v, d in deltas if abs(d) <= AT_MEDIAN_TOLERANCE]
+
+    above.sort(key=lambda x: x[2], reverse=True)
+    below.sort(key=lambda x: x[2])
+    for col, v, delta in above[:2]:
         b = benchmarks.get(col, {})
         strengths.append((col, v, {**b, "delta_to_median": delta, "recommendation": RECOMMENDATIONS.get(col, "")}))
-    for col, v, delta in deltas[-3:][::-1]:
+    for col, v, delta in below[:3]:
         b = benchmarks.get(col, {})
         focus.append((col, v, {**b, "delta_to_median": delta, "recommendation": RECOMMENDATIONS.get(col, "")}))
+    for col, v, delta in at_median_deltas:
+        b = benchmarks.get(col, {})
+        at_median.append((col, v, {**b, "delta_to_median": delta, "recommendation": RECOMMENDATIONS.get(col, "")}))
 
-    return strengths, focus
+    return strengths, focus, at_median
 
 
 # -----------------------------------------------------------------------------
@@ -481,7 +496,7 @@ def main() -> None:
     rank = int(selected.get("rank", 0))
     elig_class, elig_label = get_eligibility(rank, total_in_segment)
 
-    strengths, focus = get_insights(selected, benchmarks, metric_cols)
+    strengths, focus, at_median = get_insights(selected, benchmarks, metric_cols)
 
     # One-line summary
     summary_parts = [elig_label + "."]
@@ -557,18 +572,38 @@ def main() -> None:
                 suf = " %"
             else:
                 suf = ""
-            vs_label = "Průměr" if abs(v - p50) < 0.005 else "nad mediánem"
             st.markdown(
                 f'<div class="insight-box insight-strength">'
                 f'<div class="insight-title">Silná stránka</div>'
                 f'<div class="insight-metric">{name}</div>'
-                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} ({vs_label})</div>'
+                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} (nad mediánem)</div>'
                 f'<div class="insight-text">{d.get("recommendation", "")}</div>'
                 f"</div>",
                 unsafe_allow_html=True,
             )
     else:
         st.caption("Žádné výrazné silné stránky proti mediánu.")
+
+    st.markdown("#### Průměr (na úrovni mediánu)")
+    if at_median:
+        for name, v, d in at_median:
+            p50 = d.get("p50", 0)
+            if name == "Delivery Quality":
+                v, p50 = _as_percentage(v), _as_percentage(p50)
+                suf = " %"
+            else:
+                suf = ""
+            st.markdown(
+                f'<div class="insight-box insight-average">'
+                f'<div class="insight-title">Průměrný výkon</div>'
+                f'<div class="insight-metric">{name}</div>'
+                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} (na úrovni mediánu)</div>'
+                f'<div class="insight-text">{d.get("recommendation", "")}</div>'
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+    else:
+        st.caption("Žádná metrika přesně na úrovni mediánu.")
 
     st.markdown("#### Doporučení (na co se zaměřit)")
     if focus:
@@ -581,12 +616,11 @@ def main() -> None:
                 suf = " %"
             else:
                 suf = ""
-            vs_label = "Průměr" if abs(v - p50) < 0.005 else "pod mediánem"
             st.markdown(
                 f'<div class="insight-box insight-focus">'
                 f'<div class="insight-title">K zlepšení</div>'
                 f'<div class="insight-metric">{name}</div>'
-                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} · lepší kvartil: {p75:.2f}{suf} ({vs_label})</div>'
+                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} · lepší kvartil: {p75:.2f}{suf} (pod mediánem)</div>'
                 f'<div class="insight-text">{d.get("recommendation", "")}</div>'
                 f'<div class="insight-why">{why}</div>'
                 f"</div>",
