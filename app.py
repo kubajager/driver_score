@@ -107,6 +107,7 @@ BRAND_CSS = """
   .metric-card .metric-vs { font-size: 0.85rem; color: var(--text-secondary); }
   .metric-card .above { color: #4ADE80; font-weight: 500; }
   .metric-card .below { color: #F87171; font-weight: 500; }
+  .metric-card .average { color: var(--text-secondary); font-weight: 500; }
   .metric-bar-track {
     height: 20px;
     background: rgba(255,255,255,0.06);
@@ -362,12 +363,16 @@ def render_metric_card(
 ) -> None:
     """One metric: name, courier vs median (above/below), and P25/P50/P75 bar with labels.
     value_suffix: e.g. ' %' for percentage metrics (Delivery Quality) – display only, values stay as-is."""
-    above_median = driver_val >= p50
+    at_median = abs(driver_val - p50) < 0.005
+    above_median = driver_val > p50 and not at_median
     pos_driver, pos_p25, pos_p50, pos_p75 = _scale_positions(driver_val, p25, p50, p75)
     band_left = min(pos_p25, pos_p75) * 100
     band_width = abs(pos_p75 - pos_p25) * 100
-    status_class = "above" if above_median else "below"
-    status_text = "Nad mediánem" if above_median else "Pod mediánem"
+    if at_median:
+        status_class, status_text = "average", "Průměr"
+    else:
+        status_class = "above" if above_median else "below"
+        status_text = "Nad mediánem" if above_median else "Pod mediánem"
     suf = value_suffix
     st.markdown(
         f"""
@@ -552,11 +557,12 @@ def main() -> None:
                 suf = " %"
             else:
                 suf = ""
+            vs_label = "Průměr" if abs(v - p50) < 0.005 else "nad mediánem"
             st.markdown(
                 f'<div class="insight-box insight-strength">'
                 f'<div class="insight-title">Silná stránka</div>'
                 f'<div class="insight-metric">{name}</div>'
-                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} (nad mediánem)</div>'
+                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} ({vs_label})</div>'
                 f'<div class="insight-text">{d.get("recommendation", "")}</div>'
                 f"</div>",
                 unsafe_allow_html=True,
@@ -575,11 +581,12 @@ def main() -> None:
                 suf = " %"
             else:
                 suf = ""
+            vs_label = "Průměr" if abs(v - p50) < 0.005 else "pod mediánem"
             st.markdown(
                 f'<div class="insight-box insight-focus">'
                 f'<div class="insight-title">K zlepšení</div>'
                 f'<div class="insight-metric">{name}</div>'
-                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} · lepší kvartil: {p75:.2f}{suf} (pod mediánem)</div>'
+                f'<div class="insight-nums">Kurýr: <strong>{v:.2f}{suf}</strong> · medián: {p50:.2f}{suf} · lepší kvartil: {p75:.2f}{suf} ({vs_label})</div>'
                 f'<div class="insight-text">{d.get("recommendation", "")}</div>'
                 f'<div class="insight-why">{why}</div>'
                 f"</div>",
