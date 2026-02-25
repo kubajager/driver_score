@@ -9,7 +9,7 @@ import io
 import os
 import re
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import pandas as pd
 import streamlit as st
@@ -139,10 +139,24 @@ BRAND_CSS = """
 # -----------------------------------------------------------------------------
 
 
-def _get_excel_bytes() -> bytes | None:
-    """Load Excel from local file or from private URL (for deploy). Never put Excel in Git."""
+def _normalize_data_url(url: str) -> str:
+    """Convert Google Sheets/Drive sharing links to a direct download URL (xlsx)."""
+    url = (url or "").strip()
+    # Google Sheets: .../d/SPREADSHEET_ID/edit... or /view... -> export as xlsx
+    m = re.search(r"docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    if m:
+        return f"https://docs.google.com/spreadsheets/d/{m.group(1)}/export?format=xlsx"
+    # Google Drive file: .../file/d/FILE_ID/... or ?id=FILE_ID -> uc?export=download
+    m = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", url) or re.search(r"[?&]id=([a-zA-Z0-9_-]+)", url)
+    if m:
+        return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+    return url
+
+
+def _get_excel_bytes() -> tuple[bytes | None, str | None]:
+    """Load Excel from local file or from private URL (for deploy). Returns (data, error_hint)."""
     if EXCEL_PATH.exists():
-        return EXCEL_PATH.read_bytes()
+        return EXCEL_PATH.read_bytes(), None
     url = os.environ.get("EXCEL_URL")
     if not url and hasattr(st, "secrets"):
         try:
@@ -150,20 +164,25 @@ def _get_excel_bytes() -> bytes | None:
         except Exception:
             pass
     if not url:
-        return None
+        return None, None
+    url = _normalize_data_url(url)
     try:
-        with urlopen(url) as resp:
-            return resp.read()
-    except Exception:
-        return None
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; Streamlit)"})
+        with urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        if not data or (len(data) < 100 and b"<" in data[:200]):
+            return None, "Odkaz vrátil prázdnou odpověď nebo HTML. U Google Sheets nastavte „Kdokoli s odkazem může zobrazit“ a použijte odkaz na tabulku (export se stáhne automaticky)."
+        return data, None
+    except Exception as e:
+        return None, str(e)
 
 
 @st.cache_data(ttl=300)
-def load_all_data() -> pd.DataFrame:
-    """Load Excel from local path or from EXCEL_URL / secrets (all sheets); add segment column."""
-    data = _get_excel_bytes()
+def load_all_data() -> tuple[pd.DataFrame, str | None]:
+    """Load Excel from local path or from EXCEL_URL / secrets (all sheets). Returns (df, error_hint)."""
+    data, error_hint = _get_excel_bytes()
     if data is None:
-        return pd.DataFrame()
+        return pd.DataFrame(), error_hint
     frames: list[pd.DataFrame] = []
     for sheet in SHEET_NAMES:
         try:
@@ -174,13 +193,13 @@ def load_all_data() -> pd.DataFrame:
         df["segment"] = sheet
         frames.append(df)
     if not frames:
-        return pd.DataFrame()
+        return pd.DataFrame(), "Excel nemá očekávané listy (OOH, HD Praha, …) nebo soubor není platný xlsx."
     out = pd.concat(frames, ignore_index=True)
     numeric_cols = ["rank", "drivers_score"] + [c for c in METRIC_COLUMNS if c in out.columns]
     for col in numeric_cols:
         if col in out.columns:
             out[col] = pd.to_numeric(out[col], errors="coerce")
-    return out
+    return out, None
 
 
 def get_metric_columns_in_df(df: pd.DataFrame) -> list[str]:
@@ -395,12 +414,15 @@ def main() -> None:
 
     apply_brand()
 
-    all_data = load_all_data()
+    all_data, data_error = load_all_data()
     if all_data.empty:
-        st.warning(
+        msg = (
             "Data nenalezena. Lokálně: umístěte **Priority Booking 02-26 results.xlsx** do složky `data/`. "
-            "Při nasazení: nastavte v Secrets nebo env proměnnou **EXCEL_URL** na soukromý odkaz na soubor (Excel nesmí být v Gitu)."
+            "Při nasazení: v Secrets nastavte **excel_url** (nebo env **EXCEL_URL**) na odkaz na soubor nebo Google Sheets."
         )
+        if data_error:
+            msg += f" Detaily: {data_error}"
+        st.warning(msg)
         st.stop()
 
     benchmarks_by_sheet = compute_benchmarks_per_sheet(all_data)

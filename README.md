@@ -28,10 +28,11 @@ Excel nikdy necommitujte. Místo toho:
    - **Dropbox**: „Sdílet“ → „Vytvořit odkaz“ → v URL změňte `?dl=0` na `?dl=1` pro přímé stažení.
    - **OneDrive / S3 / vlastní server**: jakékoli soukromé URL, které vrací soubor (případně s tokenem v URL).
 
-2. V **Streamlit Cloud** u projektu: **Settings → Secrets** a přidejte:
+2. V **Streamlit Cloud** u projektu: **Settings → Secrets** a přidejte (bez mezery před `=`):
    ```toml
-   excel_url = "https://..."
+   excel_url = "https://docs.google.com/spreadsheets/d/VAS_ID/edit?usp=sharing"
    ```
+   Stačí váš běžný odkaz na Google Sheets (úpravy nebo sdílení). Aplikace ho převede na export ve formátu xlsx. Tabulka musí být nastavená tak, že **„Kdokoli s odkazem může zobrazit“** (jinak export selže).  
    Nebo nastavte proměnnou prostředí **`EXCEL_URL`** na stejnou URL.
 
 Aplikace při startu nejdřív zkusí lokální soubor v `data/`; pokud neexistuje, stáhne data z `excel_url` / `EXCEL_URL`. Data tak zůstanou mimo Git a nikdo je v repu neuvidí.
