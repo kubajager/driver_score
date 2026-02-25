@@ -5,9 +5,11 @@ Search courier by name or driver_id, see segment, rank, metrics, benchmarks, and
 
 from __future__ import annotations
 
+import io
 import os
 import re
 from pathlib import Path
+from urllib.request import urlopen
 
 import pandas as pd
 import streamlit as st
@@ -137,15 +139,35 @@ BRAND_CSS = """
 # -----------------------------------------------------------------------------
 
 
+def _get_excel_bytes() -> bytes | None:
+    """Load Excel from local file or from private URL (for deploy). Never put Excel in Git."""
+    if EXCEL_PATH.exists():
+        return EXCEL_PATH.read_bytes()
+    url = os.environ.get("EXCEL_URL")
+    if not url and hasattr(st, "secrets"):
+        try:
+            url = getattr(st.secrets, "excel_url", None) or (st.secrets.get("excel_url") if hasattr(st.secrets, "get") else None)
+        except Exception:
+            pass
+    if not url:
+        return None
+    try:
+        with urlopen(url) as resp:
+            return resp.read()
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=300)
-def load_all_data(excel_path: Path) -> pd.DataFrame:
-    """Load Excel, all sheets; add segment column. Returns one DataFrame."""
-    if not excel_path.exists():
+def load_all_data() -> pd.DataFrame:
+    """Load Excel from local path or from EXCEL_URL / secrets (all sheets); add segment column."""
+    data = _get_excel_bytes()
+    if data is None:
         return pd.DataFrame()
     frames: list[pd.DataFrame] = []
     for sheet in SHEET_NAMES:
         try:
-            df = pd.read_excel(excel_path, sheet_name=sheet)
+            df = pd.read_excel(io.BytesIO(data), sheet_name=sheet)
         except Exception:
             continue
         df = df.copy()
@@ -154,7 +176,6 @@ def load_all_data(excel_path: Path) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     out = pd.concat(frames, ignore_index=True)
-    # Normalize numeric columns
     numeric_cols = ["rank", "drivers_score"] + [c for c in METRIC_COLUMNS if c in out.columns]
     for col in numeric_cols:
         if col in out.columns:
@@ -374,11 +395,11 @@ def main() -> None:
 
     apply_brand()
 
-    all_data = load_all_data(EXCEL_PATH)
+    all_data = load_all_data()
     if all_data.empty:
         st.warning(
-            f"Data soubor nenalezen. Umístěte soubor **Priority Booking 02-26 results.xlsx** do složky `data/` "
-            f"(cesta: `{EXCEL_PATH}`) a obnovte stránku."
+            "Data nenalezena. Lokálně: umístěte **Priority Booking 02-26 results.xlsx** do složky `data/`. "
+            "Při nasazení: nastavte v Secrets nebo env proměnnou **EXCEL_URL** na soukromý odkaz na soubor (Excel nesmí být v Gitu)."
         )
         st.stop()
 

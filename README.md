@@ -13,15 +13,34 @@ Prohlížeč se otevře na `http://localhost:8501`.
 
 ## Data
 
-Aplikace načítá Excel ze souboru:
+**Excel nesmí být v Gitu** (soubor je v `.gitignore`). Repozitář může zůstat veřejný – data se načtou jinak.
 
-**`data/Priority Booking 02-26 results.xlsx`**
+### Lokální spuštění
 
-Před prvním spuštěním zkopírujte tento soubor do složky `data/`. Očekávané listy: **OOH**, **HD Praha**, **HD Brno**, **HD Ostrava**, **HD Olomouc**, **HD HK**, **HD Plzen**.
+Umístěte **`Priority Booking 02-26 results.xlsx`** do složky **`data/`**. Aplikace ho načte z disku.
+
+### Nasazení (Streamlit Cloud atd.)
+
+Excel nikdy necommitujte. Místo toho:
+
+1. Nahrajte Excel do **soukromého** úložiště, které umí vrátit soubor na URL:
+   - **Google Drive**: soubor → „Sdílet“ → „Kdokoli s odkazem“ → získejte odkaz ke stažení (např. `https://drive.google.com/uc?export=download&id=ID_SOUBORU`).
+   - **Dropbox**: „Sdílet“ → „Vytvořit odkaz“ → v URL změňte `?dl=0` na `?dl=1` pro přímé stažení.
+   - **OneDrive / S3 / vlastní server**: jakékoli soukromé URL, které vrací soubor (případně s tokenem v URL).
+
+2. V **Streamlit Cloud** u projektu: **Settings → Secrets** a přidejte:
+   ```toml
+   excel_url = "https://..."
+   ```
+   Nebo nastavte proměnnou prostředí **`EXCEL_URL`** na stejnou URL.
+
+Aplikace při startu nejdřív zkusí lokální soubor v `data/`; pokud neexistuje, stáhne data z `excel_url` / `EXCEL_URL`. Data tak zůstanou mimo Git a nikdo je v repu neuvidí.
+
+Očekávané listy v Excelu: **OOH**, **HD Praha**, **HD Brno**, **HD Ostrava**, **HD Olomouc**, **HD HK**, **HD Plzen**.
 
 ### Aktualizace dat (měsíční)
 
-1. Nahraďte soubor **`data/Priority Booking 02-26 results.xlsx`** novým exportem (stejná struktura).
+1. **Lokálně:** nahraďte soubor v **`data/`** novým exportem. **Při nasazení:** nahrajte nový Excel do stejného úložiště (stejná URL) nebo aktualizujte soubor na téže adrese.
 2. Zachovejte názvy listů a názvy sloupců:
    - `full_name`, `contact_email`, `driver_id`, `primary_ride_type`, `working_city`, `rank`, `drivers_score`
    - Metriky: `Kvalita doručení`, `Efektivita jízdy`, `Zdvojené/otočky`, `Jízdy Po, Út, Pá`, `Zpoždění v jízdě`, `Zpoždění na příjezdu`, `Delivery Quality`
